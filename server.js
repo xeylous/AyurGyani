@@ -4,10 +4,36 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { sendRecommendation } from "./mailer.js";
 import { BASE_PROMPT } from "./promptTemplate.js";
 import { CONTINUE_PROMPT } from "./continuePrompt.js";
+import cors from "cors"; // Added CORS import
 
 dotenv.config();
-
 const app = express();
+
+// --- CORS Configuration ---
+const allowedOrigins = [
+  "https://ayur-sathi.vercel.app",
+  "http://localhost:3000"
+];
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl) or if the origin is in the allowed list
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.log(`CORS Error: Origin ${origin} not allowed.`);
+      callback(new Error('Not allowed by CORS'), false);
+    }
+  },
+  methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+  credentials: true,
+  optionsSuccessStatus: 204
+};
+
+// Apply CORS middleware
+app.use(cors(corsOptions));
+// --------------------------
+
 app.use(express.json());
 
 // AI Model
@@ -30,7 +56,6 @@ app.post("/chat", async (req, res) => {
 
   try {
     switch (state.step) {
-
       case "greet":
         response = "Namaste 🙏 Welcome to AyurSathi! What is your good name?";
         state.step = "ask_name";
@@ -44,7 +69,6 @@ app.post("/chat", async (req, res) => {
 
       case "ask_problem":
         state.problem = userMessage;
-
         const firstResponse = await model.generateContent({
           contents: [
             {
@@ -53,21 +77,18 @@ app.post("/chat", async (req, res) => {
             },
           ],
         });
-
         response = firstResponse.response.text();
         state.step = "conversation";
         break;
 
       case "conversation":
-
         // If user wants to end the conversation
         if (
           userMessage.toLowerCase().includes("thank you") ||
           userMessage.toLowerCase().includes("thanks") ||
           userMessage.toLowerCase().includes("bye")
         ) {
-          response = `You're most welcome, ${state.name} 🌿  
-Wishing you peace, balance, and good health. Take care 💚`;
+          response = `You're most welcome, ${state.name} 🌿  Wishing you peace, balance, and good health. Take care 💚`;
           delete conversationState[userId];
           break;
         }
@@ -81,7 +102,6 @@ Wishing you peace, balance, and good health. Take care 💚`;
             },
           ],
         });
-
         response = chatResponse.response.text();
         break;
 
@@ -89,7 +109,6 @@ Wishing you peace, balance, and good health. Take care 💚`;
         response = "Namaste 🌿 Let's start fresh. What is your good name?";
         state.step = "ask_name";
     }
-
   } catch (error) {
     console.error("Error:", error);
     response = "Something went wrong, but don't worry — we will continue shortly 🌿";
