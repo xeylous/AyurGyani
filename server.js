@@ -43,6 +43,23 @@ const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 // In-memory session storage
 let conversationState = {};
 
+//ping route for keeping server awake
+app.get("/ping", (req, res) => {
+  console.log(`🔄 Ping received at: ${new Date().toISOString()}`);
+  res.status(200).send("💚 AyurSathi server is active");
+});
+
+// Health Route (monitoring/uptime check)
+app.get("/health", (req, res) => {
+  console.log(`🩺 Health check at ${new Date().toISOString()}`);
+  res.status(200).json({
+    status: "healthy",
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString()
+  });
+});
+
+
 app.post("/chat", async (req, res) => {
   const userMessage = req.body.message;
   const userId = req.body.userId || "guest_" + Date.now();
