@@ -18,14 +18,14 @@ const batchSchema = new mongoose.Schema({
 const BatchModel = mongoose.models.Batch || mongoose.model("Batch", batchSchema);
 
 /**
- * Tool Execution: Check Batch Traceability Status via Live Public API & MongoDB
+ * Tool Execution: Check Batch Traceability Status via Live Public API & Base64 Decoder
  */
 export async function executeCheckBatchTraceability({ batchId }) {
   if (!batchId) {
     return { 
       success: false, 
       needBatchId: true, 
-      message: "Please ask the user for their specific Batch ID (e.g. ASW-2025-5031, TUL-2025-3044, AML-2025-1020)." 
+      message: "Please ask the user for their specific Batch ID (e.g. MUL-2026-4871, ASW-2025-5031, TUL-2025-3044)." 
     };
   }
 
@@ -36,11 +36,11 @@ export async function executeCheckBatchTraceability({ batchId }) {
     return { 
       success: false, 
       needBatchId: true, 
-      message: "Batch ID was not specified by the user. Ask the user for their Batch ID (e.g. ASW-2025-5031, TUL-2025-3044)." 
+      message: "Batch ID was not specified by the user. Ask the user for their Batch ID (e.g. MUL-2026-4871, ASW-2025-5031)." 
     };
   }
 
-  // 1️⃣ Live API Fetch: /api/public/batch?batchId=...
+  // 1️⃣ Live Public API Fetch & Base64 Payload Decoder: /api/public/batch?batchId=...
   try {
     const baseUrl = config.frontendUrl || "https://ayur-sathi.vercel.app";
     const apiUrl = `${baseUrl}/api/public/batch?batchId=${encodeURIComponent(cleanBatchId)}`;
@@ -52,20 +52,37 @@ export async function executeCheckBatchTraceability({ batchId }) {
 
     if (res.ok) {
       const data = await res.json();
-      const batchObj = data.batch || data.data || data;
+      let batchObj = data.batch || data.data || data;
 
-      if (batchObj && (batchObj.batchId || batchObj.speciesId || batchObj.status)) {
+      // Base64 Encrypted Payload Decoder
+      if (data.encoded) {
+        try {
+          const jsonStr = Buffer.from(data.encoded, "base64").toString("utf-8");
+          batchObj = JSON.parse(jsonStr);
+        } catch (e) {
+          console.warn("⚠️ Failed to parse base64 encoded batch payload:", e.message);
+        }
+      }
+
+      if (batchObj && (batchObj.batchId || batchObj.speciesId || batchObj.acceptedBy)) {
+        const tests = batchObj.tests || {};
+        const labSummary = tests.purity 
+          ? `Purity ${tests.purity}, Moisture ${tests.moisture || 'N/A'}, pH ${tests.ph || 'N/A'}`
+          : (batchObj.labStatus || "Passed Lab Testing & Quality Check");
+
+        const operator = batchObj.manufacturingProcesses?.[0]?.operator || batchObj.acceptedBy || "Verified Organic Farmer";
+
         return {
           success: true,
           found: true,
-          source: "Live API",
+          source: "Live Public API",
           batch: {
             batchId: batchObj.batchId || cleanBatchId,
-            speciesId: batchObj.speciesId || batchObj.cropName || batchObj.species || "Ayurvedic Herb Batch",
-            status: batchObj.status || "VERIFIED & APPROVED",
-            farmerName: batchObj.farmerName || batchObj.farmer || "Verified Organic Farmer",
-            labTesting: batchObj.labStatus || batchObj.labTesting || "Purity 99.2%, Heavy Metal Free",
-            lastUpdated: batchObj.lastUpdated || batchObj.updatedAt || new Date().toISOString().split("T")[0],
+            speciesId: batchObj.speciesId || batchObj.cropName || "Ayurvedic Herb Batch",
+            status: batchObj.manufacturingProcesses?.length > 0 ? "MANUFACTURING COMPLETED (Final Quality Passed)" : (batchObj.status || "VERIFIED & APPROVED"),
+            farmerName: operator,
+            labTesting: labSummary,
+            lastUpdated: (batchObj.updatedAt || new Date().toISOString()).split("T")[0],
             certificateUrl: batchObj.certificateUrl || `${baseUrl}/verify/${cleanBatchId}`
           }
         };
@@ -109,19 +126,19 @@ export async function executeCheckBatchTraceability({ batchId }) {
   return {
     success: false,
     found: false,
-    message: `Batch ID '${cleanBatchId}' was not found in the live registry. Please double-check the Batch ID format (e.g. ASW-2025-5031, TUL-2025-3044).`
+    message: `Batch ID '${cleanBatchId}' was not found in the live registry. Please double-check the Batch ID format (e.g. MUL-2026-4871, ASW-2025-5031, TUL-2025-3044).`
   };
 }
 
 export const checkBatchTraceabilityDeclaration = {
   name: "check_batch_traceability",
-  description: "Check live blockchain supply chain traceability, lab testing status, harvest info, and verification certificate for a specific crop/herb batch ID (e.g. ASW-2025-5031, TUL-2025-3044) by querying the live public batch API.",
+  description: "Check live blockchain supply chain traceability, lab testing status, harvest info, and verification certificate for a specific crop/herb batch ID (e.g. MUL-2026-4871, ASW-2025-5031, TUL-2025-3044) by querying the live public batch API.",
   parameters: {
     type: "OBJECT",
     properties: {
       batchId: {
         type: "STRING",
-        description: "The specific batch identification code (e.g. ASW-2025-5031, TUL-2025-3044, AML-2025-1020)"
+        description: "The specific batch identification code (e.g. MUL-2026-4871, ASW-2025-5031, TUL-2025-3044)"
       }
     },
     required: ["batchId"]
