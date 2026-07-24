@@ -41,7 +41,6 @@ let lastModelFetchTime = 0;
  */
 async function getGroqCandidateModels(groq) {
   const now = Date.now();
-  // Cache active model list for 5 minutes to minimize API overhead
   if (cachedActiveGroqModels && (now - lastModelFetchTime < 5 * 60 * 1000)) {
     return cachedActiveGroqModels;
   }
@@ -55,10 +54,7 @@ async function getGroqCandidateModels(groq) {
         .map(m => m.id)
     );
 
-    // Filter preferred list down to currently active models
     const availablePreferred = PREFERRED_GROQ_MODELS.filter(id => activeModelIds.has(id));
-    
-    // Add any remaining active models as secondary options
     const secondaryActive = Array.from(activeModelIds).filter(id => !PREFERRED_GROQ_MODELS.includes(id));
     
     cachedActiveGroqModels = [...availablePreferred, ...secondaryActive];
@@ -76,48 +72,47 @@ async function getGroqCandidateModels(groq) {
  * Process a user message through the Enterprise Agentic Engine using Groq with Failover
  */
 export async function processAgentMessage(userId, userMessage) {
-  const session = sessionStore.getSession(userId);
+  const session = await sessionStore.getSession(userId);
   const executedTools = [];
 
   // Step 1: Manage Onboarding State Progression (UI Backwards Compatibility)
   if (session.step === "greet") {
-    sessionStore.updateSession(userId, { step: "ask_name" });
+    await sessionStore.updateSession(userId, { step: "ask_name" });
     const reply = "Namaste 🙏 Welcome to AyurSathi! What is your good name?";
-    sessionStore.addHistoryTurn(userId, "model", reply);
+    await sessionStore.addHistoryTurn(userId, "model", reply);
     return { reply, step: "ask_name", toolsExecuted: [], modelUsed: "Static Welcome" };
   }
 
   if (session.step === "ask_name") {
-    sessionStore.updateSession(userId, { name: userMessage, step: "ask_problem" });
+    await sessionStore.updateSession(userId, { name: userMessage, step: "ask_problem" });
     const reply = `Nice to meet you, ${userMessage}! How can I help you today? 🌿`;
-    sessionStore.addHistoryTurn(userId, "model", reply);
+    await sessionStore.addHistoryTurn(userId, "model", reply);
     return { reply, step: "ask_problem", toolsExecuted: [], modelUsed: "Static Welcome" };
   }
 
-  // Check for session exit keywords
+  // Check for session exit keywords -> Delete session document from MongoDB upon chat end
   if (session.step === "conversation" && userMessage) {
     const lower = userMessage.toLowerCase();
     if (lower.includes("thank you") || lower.includes("thanks") || lower.includes("bye")) {
       const farewell = `You're most welcome, ${session.name || "friend"} 🌿 Wishing you peace, balance, and good health. Take care 💚`;
-      sessionStore.deleteSession(userId);
+      await sessionStore.deleteSession(userId);
       return { reply: farewell, step: undefined, toolsExecuted: [], modelUsed: "Static Goodbye" };
     }
   }
 
   // Advance step to conversation for future turns
   if (session.step === "ask_problem") {
-    sessionStore.updateSession(userId, { problem: userMessage, step: "conversation" });
+    await sessionStore.updateSession(userId, { problem: userMessage, step: "conversation" });
   }
 
-  // Add user message to session history
-  sessionStore.addHistoryTurn(userId, "user", userMessage);
+  // Add user message to session history in MongoDB
+  await sessionStore.addHistoryTurn(userId, "user", userMessage);
 
   // Step 2: Attempt Execution via Groq (Primary LLM)
   if (groqClient) {
     try {
       const candidateModels = await getGroqCandidateModels(groqClient);
       
-      // Try candidate models in order until one succeeds (Failover protection)
       for (const targetModel of candidateModels) {
         try {
           console.log(`🚀 Executing Agentic Loop on Groq Model: '${targetModel}'...`);
@@ -167,13 +162,11 @@ export async function processAgentMessage(userId, userMessage) {
  * Execute Groq Function Calling & Completion Loop
  */
 async function runGroqAgenticLoop(groq, modelName, session, executedTools, userId) {
-  // Format conversation history for Groq messages API
   const messages = [
     { role: "system", content: SYSTEM_AGENT_PROMPT }
   ];
 
-  // Convert stored session history turns into OpenAI/Groq message objects
-  session.history.slice(-10).forEach(turn => {
+  (session.history || []).slice(-10).forEach(turn => {
     const role = turn.role === "model" ? "assistant" : "user";
     const textContent = Array.isArray(turn.parts)
       ? turn.parts.map(p => p.text || "").join("\n")
@@ -202,9 +195,8 @@ async function runGroqAgenticLoop(groq, modelName, session, executedTools, userI
 
     if (!message) break;
 
-    // Check if Groq requests tool execution
     if (message.tool_calls && message.tool_calls.length > 0) {
-      messages.push(message); // Append assistant's tool call message
+      messages.push(message);
 
       for (const toolCall of message.tool_calls) {
         const fnName = toolCall.function.name;
@@ -225,9 +217,8 @@ async function runGroqAgenticLoop(groq, modelName, session, executedTools, userI
         }
 
         executedTools.push({ toolName: fnName, args: fnArgs, result: toolResult });
-        sessionStore.logToolExecution(userId, fnName, fnArgs, toolResult);
+        await sessionStore.logToolExecution(userId, fnName, fnArgs, toolResult);
 
-        // Append tool result message back to messages history
         messages.push({
           role: "tool",
           tool_call_id: toolCall.id,
@@ -235,7 +226,6 @@ async function runGroqAgenticLoop(groq, modelName, session, executedTools, userI
         });
       }
     } else {
-      // Model returned final natural text answer
       finalReply = message.content || "";
       break;
     }
@@ -245,7 +235,7 @@ async function runGroqAgenticLoop(groq, modelName, session, executedTools, userI
     finalReply = "I am here to support your Ayurvedic journey 🌿 How else may I help?";
   }
 
-  sessionStore.addHistoryTurn(userId, "model", finalReply);
+  await sessionStore.addHistoryTurn(userId, "model", finalReply);
   return { reply: finalReply };
 }
 
@@ -253,7 +243,7 @@ async function runGroqAgenticLoop(groq, modelName, session, executedTools, userI
  * Gemini Fallback Agent Loop
  */
 async function runGeminiAgenticLoop(geminiModel, session, executedTools, userId) {
-  const conversationHistory = session.history.slice(-10).map(turn => ({
+  const conversationHistory = (session.history || []).slice(-10).map(turn => ({
     role: turn.role,
     parts: turn.parts
   }));
@@ -270,7 +260,7 @@ async function runGeminiAgenticLoop(geminiModel, session, executedTools, userId)
     for (const call of functionCalls) {
       const toolResult = await executeTool(call.name, call.args);
       executedTools.push({ toolName: call.name, args: call.args, result: toolResult });
-      sessionStore.logToolExecution(userId, call.name, call.args, toolResult);
+      await sessionStore.logToolExecution(userId, call.name, call.args, toolResult);
 
       functionResponseParts.push({
         functionResponse: { name: call.name, response: { name: call.name, content: toolResult } }
@@ -286,6 +276,6 @@ async function runGeminiAgenticLoop(geminiModel, session, executedTools, userId)
   }
 
   const finalReply = responseResult.response?.text() || "Wishing you peace and balance 🌿";
-  sessionStore.addHistoryTurn(userId, "model", finalReply);
+  await sessionStore.addHistoryTurn(userId, "model", finalReply);
   return { reply: finalReply };
 }

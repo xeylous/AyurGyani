@@ -3,6 +3,7 @@ import { executeFindAyurvedicRemedy, findAyurvedicRemedyDeclaration } from "./re
 import { executeAssessDoshaBalance, assessDoshaBalanceDeclaration } from "./doshaTool.js";
 import { executeCheckSafetyContraindications, checkSafetyContraindicationsDeclaration } from "./safetyTool.js";
 import { executeSendRecommendationEmail, sendRecommendationEmailDeclaration } from "./mailerTool.js";
+import { executeCheckBatchTraceability, checkBatchTraceabilityDeclaration } from "./batchTool.js";
 
 /**
  * Native Gemini Tool Declarations
@@ -12,7 +13,8 @@ export const toolDeclarations = [
   findAyurvedicRemedyDeclaration,
   assessDoshaBalanceDeclaration,
   checkSafetyContraindicationsDeclaration,
-  sendRecommendationEmailDeclaration
+  sendRecommendationEmailDeclaration,
+  checkBatchTraceabilityDeclaration
 ];
 
 /**
@@ -49,7 +51,8 @@ const toolExecutors = {
   find_ayurvedic_remedy: executeFindAyurvedicRemedy,
   assess_dosha_balance: executeAssessDoshaBalance,
   check_safety_contraindications: executeCheckSafetyContraindications,
-  send_recommendation_email: executeSendRecommendationEmail
+  send_recommendation_email: executeSendRecommendationEmail,
+  check_batch_traceability: executeCheckBatchTraceability
 };
 
 /**

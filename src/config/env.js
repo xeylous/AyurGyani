@@ -3,6 +3,7 @@ dotenv.config();
 
 export const config = {
   port: process.env.PORT || 3000,
+  mongoUri: process.env.MONGO_URI || process.env.MONGODB_URI || "mongodb+srv://ayursaathi_db_user:COZ4CrtqArOhzsz1@ayursaathi.cgrwcre.mongodb.net/ayursaathi",
   groqApiKey: process.env.GROQ_API_KEY || "",
   groqModel: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
   googleApiKey: process.env.GOOGLE_API_KEY || "",

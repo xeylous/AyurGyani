@@ -1,20 +1,15 @@
+import { mongoSessionStore, initMongoConnection } from "./mongoStore.js";
+import { config } from "../config/env.js";
+
 /**
- * Enterprise Session & Memory Persistence Store
- * Manages persistent user states, multi-turn chat history, and tool execution logs.
+ * Enterprise In-Memory Session Store (Fallback)
  */
-class SessionStore {
+class MemorySessionStore {
   constructor() {
     this.sessions = new Map();
-    // Auto cleanup inactive sessions older than 24 hours
     this.ttlMs = 24 * 60 * 60 * 1000;
-    this.startCleanupTimer();
   }
 
-  /**
-   * Get or create user session
-   * @param {string} userId 
-   * @returns {Object} User session object
-   */
   getSession(userId) {
     const id = userId || `guest_${Date.now()}`;
     if (!this.sessions.has(id)) {
@@ -34,23 +29,12 @@ class SessionStore {
     return session;
   }
 
-  /**
-   * Update user session data
-   * @param {string} userId 
-   * @param {Object} updates 
-   */
   updateSession(userId, updates) {
     const session = this.getSession(userId);
     Object.assign(session, updates, { lastActive: Date.now() });
     return session;
   }
 
-  /**
-   * Append a chat turn to the user history
-   * @param {string} userId 
-   * @param {string} role - 'user' | 'model' | 'function'
-   * @param {string|Array} parts 
-   */
   addHistoryTurn(userId, role, parts) {
     const session = this.getSession(userId);
     const content = typeof parts === "string" ? [{ text: parts }] : parts;
@@ -63,13 +47,6 @@ class SessionStore {
     return session;
   }
 
-  /**
-   * Log a tool execution event
-   * @param {string} userId 
-   * @param {string} toolName 
-   * @param {Object} args 
-   * @param {Object} result 
-   */
   logToolExecution(userId, toolName, args, result) {
     const session = this.getSession(userId);
     session.toolExecutions.push({
@@ -80,46 +57,71 @@ class SessionStore {
     });
   }
 
-  /**
-   * Clear session explicitly (e.g., when user says goodbye)
-   * @param {string} userId 
-   */
   deleteSession(userId) {
     if (userId) {
+      console.log(`🧹 Clearing in-memory session: ${userId}`);
       return this.sessions.delete(userId);
     }
     return false;
   }
 
-  /**
-   * Get active sessions summary for health monitoring
-   */
   getStats() {
     return {
       activeSessionsCount: this.sessions.size,
-      oldestSession: this.getOldestSessionAge()
+      oldestSession: 0
     };
-  }
-
-  getOldestSessionAge() {
-    let oldest = Date.now();
-    for (const s of this.sessions.values()) {
-      if (s.lastActive < oldest) oldest = s.lastActive;
-    }
-    return oldest === Date.now() ? 0 : Math.round((Date.now() - oldest) / 1000);
-  }
-
-  startCleanupTimer() {
-    setInterval(() => {
-      const now = Date.now();
-      for (const [id, session] of this.sessions.entries()) {
-        if (now - session.lastActive > this.ttlMs) {
-          console.log(`🧹 Evicting inactive session: ${id}`);
-          this.sessions.delete(id);
-        }
-      }
-    }, 60 * 60 * 1000); // Check hourly
   }
 }
 
-export const sessionStore = new SessionStore();
+const memoryStore = new MemorySessionStore();
+
+/**
+ * Unified Session Manager Bridge (MongoDB + Memory Fallback)
+ */
+class UnifiedSessionStore {
+  async getSession(userId) {
+    if (config.mongoUri) {
+      const doc = await mongoSessionStore.getSession(userId);
+      if (doc) return doc;
+    }
+    return memoryStore.getSession(userId);
+  }
+
+  async updateSession(userId, updates) {
+    if (config.mongoUri) {
+      const doc = await mongoSessionStore.updateSession(userId, updates);
+      if (doc) return doc;
+    }
+    return memoryStore.updateSession(userId, updates);
+  }
+
+  async addHistoryTurn(userId, role, parts) {
+    if (config.mongoUri) {
+      const doc = await mongoSessionStore.addHistoryTurn(userId, role, parts);
+      if (doc) return doc;
+    }
+    return memoryStore.addHistoryTurn(userId, role, parts);
+  }
+
+  async logToolExecution(userId, toolName, args, result) {
+    if (config.mongoUri) {
+      await mongoSessionStore.logToolExecution(userId, toolName, args, result);
+    }
+    memoryStore.logToolExecution(userId, toolName, args, result);
+  }
+
+  async deleteSession(userId) {
+    let mongoDeleted = false;
+    if (config.mongoUri) {
+      mongoDeleted = await mongoSessionStore.deleteSession(userId);
+    }
+    const memDeleted = memoryStore.deleteSession(userId);
+    return mongoDeleted || memDeleted;
+  }
+
+  getStats() {
+    return memoryStore.getStats();
+  }
+}
+
+export const sessionStore = new UnifiedSessionStore();
