@@ -75,19 +75,9 @@ export async function processAgentMessage(userId, userMessage) {
   const session = await sessionStore.getSession(userId);
   const executedTools = [];
 
-  // Step 1: Manage Onboarding State Progression (UI Backwards Compatibility)
-  if (session.step === "greet") {
-    await sessionStore.updateSession(userId, { step: "ask_name" });
-    const reply = "Namaste 🙏 Welcome to AyurSathi! What is your good name?";
-    await sessionStore.addHistoryTurn(userId, "model", reply);
-    return { reply, step: "ask_name", toolsExecuted: [], modelUsed: "Static Welcome" };
-  }
-
-  if (session.step === "ask_name") {
-    await sessionStore.updateSession(userId, { name: userMessage, step: "ask_problem" });
-    const reply = `Nice to meet you, ${userMessage}! How can I help you today? 🌿`;
-    await sessionStore.addHistoryTurn(userId, "model", reply);
-    return { reply, step: "ask_problem", toolsExecuted: [], modelUsed: "Static Welcome" };
+  // Direct Agentic Loop Execution (Bypass legacy name interrogation steps)
+  if (session.step === "greet" || session.step === "ask_name" || session.step === "ask_problem") {
+    await sessionStore.updateSession(userId, { step: "conversation" });
   }
 
   // Check for session exit keywords -> Delete session document from MongoDB upon chat end
@@ -105,8 +95,17 @@ export async function processAgentMessage(userId, userMessage) {
     await sessionStore.updateSession(userId, { problem: userMessage, step: "conversation" });
   }
 
-  // Add user message to session history in MongoDB
-  await sessionStore.addHistoryTurn(userId, "user", userMessage);
+  // Add user message to session history in MongoDB and sync local session history
+  const updatedDoc = await sessionStore.addHistoryTurn(userId, "user", userMessage);
+  if (updatedDoc && updatedDoc.history) {
+    session.history = updatedDoc.history;
+  } else if (session.history) {
+    session.history.push({
+      role: "user",
+      parts: [{ text: userMessage }],
+      timestamp: new Date().toISOString()
+    });
+  }
 
   // Step 2: Attempt Execution via Groq (Primary LLM)
   if (groqClient) {

@@ -56,7 +56,7 @@ export class MongoSessionStore {
       doc = await SessionModel.create({
         userId: id,
         name: null,
-        step: "greet",
+        step: "conversation",
         history: [],
         toolExecutions: [],
         lastActive: new Date()

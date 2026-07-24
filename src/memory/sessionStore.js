@@ -16,7 +16,7 @@ class MemorySessionStore {
       this.sessions.set(id, {
         userId: id,
         name: null,
-        step: "greet",
+        step: "conversation",
         doshaProfile: null,
         history: [],
         toolExecutions: [],
